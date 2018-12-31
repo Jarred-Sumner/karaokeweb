@@ -1,0 +1,24 @@
+{
+  "development": {
+    "username": "jarred",
+    "password": null,
+    "database": "karaokeapp_development",
+    "host": "127.0.0.1",
+    "dialect": "postgres",
+    "sync": true
+  },
+  "test": {
+    "username": "root",
+    "password": null,
+    "database": "karaokeapp_test",
+    "host": "127.0.0.1",
+    "dialect": "postgres"
+  },
+  "production": {
+    "username": "root",
+    "password": null,
+    "database": "karaokeapp_production",
+    "host": "127.0.0.1",
+    "dialect": "postgres"
+  }
+}
