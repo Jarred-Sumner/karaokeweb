@@ -7,6 +7,7 @@ import logger from "morgan";
 
 import { ExpressPeerServer as PeerJS } from "peer";
 import apiRouter from "./routes/api";
+import socket from "socket.io";
 
 var peer;
 var app = express();
@@ -43,15 +44,15 @@ const playerMiddleware = (req, res, next) => {
   }
 };
 
-app.use("/api", playerMiddleware, apiRouter);
-function setupPeerServer(server) {
+function setup(server, port) {
   peer = PeerJS(server, {
     debug: process.env.NODE_ENV === "development",
-    proxied: process.env.NODE_ENV !== "development"
+    proxied: process.env.NODE_ENV !== "development",
+    path: "/api/peerjs",
+    port
   });
   app.use("/api/peerjs", peer);
+  app.use("/api", playerMiddleware, apiRouter(socket(server)));
 }
 
-module.exports = sequelize
-  .sync()
-  .then(() => [app, setupPeerServer], console.error);
+module.exports = sequelize.sync().then(() => [app, setup], console.error);

@@ -33,7 +33,7 @@ load.then(result => {
   server.listen(port);
   server.on("error", onError);
   server.on("listening", onListening);
-  setupPeerServer(server);
+  setupPeerServer(server, port);
 });
 
 /**

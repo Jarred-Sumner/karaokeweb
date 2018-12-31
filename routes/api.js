@@ -1,10 +1,12 @@
 var express = require("express");
 var router = express.Router();
-import { Lyric, Song, Sequelize, Match, MatchPlayer } from "../models";
+import { Lyric, Song, Sequelize, Match, MatchPlayer, Player } from "../models";
 import { addMinutes, isPast } from "date-fns";
 
 const MATCH_MAX_WAIT_MINUTES = 10;
 const LOBBY_SIZE = 6;
+
+const matchRoom = match => `match-${match.channel}`;
 
 function getRandomSongId(max = 2) {
   return Math.floor(Math.random() * Math.floor(max));
@@ -56,12 +58,23 @@ const playerJson = player => {
   };
 };
 
+const matchPlayerJson = matchPlayer => {
+  return {
+    id: matchPlayer.id,
+    object: "match_player",
+    playerStatus: matchPlayer.playerStatus,
+    player: playerJson(matchPlayer.player)
+  };
+};
+
 const matchJson = async match => {
   return {
     id: match.id,
     object: "match",
     status: match.status,
-    players: (await match.getPlayers()).map(playerJson),
+    players: (await MatchPlayer.findAll({ where: { MatchId: match.id } })).map(
+      matchPlayerJson
+    ),
     song: await songJson(await match.getSong())
   };
 };
@@ -124,48 +137,108 @@ const findOrMatchmake = async player => {
   return match;
 };
 
-router.get("/songs/:id", (req, res) => {
-  Song.findByPk(req.params.id).then(async song => {
-    if (!song) {
-      res.status(404);
-      return res.send(null);
-    }
-
-    res.send(await songJson(song));
-  }, fail(res));
-});
-
-router.get("/songs", (req, res) => {
-  Song.findAll().then(songs => {
-    Promise.all(songs.map(songJson)).then(res.send, fail);
-  }, fail(res));
-});
-
-router.get("/match", (req, res) => {
-  getCurrentMatch(req.player).then(async match => {
-    if (match) {
-      if (match.status === "lobby" && match.lobbyExpiresAt > new Date()) {
-        await match.update({
-          status: "ended"
-        });
-        await match.reload();
+export default io => {
+  router.get("/songs/:id", (req, res) => {
+    Song.findByPk(req.params.id).then(async song => {
+      if (!song) {
+        res.status(404);
+        return res.send(null);
       }
 
-      res.send(await matchJson(match));
-    } else {
-      res.send(null);
-    }
-  }, fail(res));
-});
-
-router.post("/match", (req, res) => {
-  findOrMatchmake(req.player).then(async match => {
-    if (match) {
-      res.send(await matchJson(match));
-    } else {
-      res.send(null);
-    }
+      res.send(await songJson(song));
+    }, fail(res));
   });
-});
 
-module.exports = router;
+  router.get("/songs", (req, res) => {
+    Song.findAll().then(songs => {
+      Promise.all(songs.map(songJson)).then(res.send, fail);
+    }, fail(res));
+  });
+
+  router.get("/match", (req, res) => {
+    getCurrentMatch(req.player).then(async match => {
+      if (match) {
+        if (match.status === "lobby" && match.lobbyExpiresAt > new Date()) {
+          await match.update({
+            status: "ended"
+          });
+          await match.reload();
+          io.to(matchRoom(match)).emit("match", await matchJson(match));
+        }
+
+        res.send(await matchJson(match));
+      } else {
+        res.send(null);
+      }
+    }, fail(res));
+  });
+
+  router.post("/match", (req, res) => {
+    findOrMatchmake(req.player).then(async match => {
+      if (match) {
+        const json = await matchJson(match);
+        io.to(matchRoom(match)).emit("match", json);
+        res.send(json);
+      } else {
+        res.send(null);
+      }
+    });
+  });
+
+  io.on("connection", socket => {
+    let SOCKETS_TO_DEVICES = {};
+    socket.on("identify", async deviceToken => {
+      SOCKETS_TO_DEVICES[socket.id] = deviceToken;
+
+      const player = await Player.findOne({
+        where: {
+          deviceToken
+        }
+      });
+
+      const match = await getCurrentMatch(player);
+      const matchPlayer = await MatchPlayer.findOne({
+        where: {
+          PlayerId: player.id,
+          MatchId: match.id
+        }
+      });
+
+      matchPlayer.update({
+        playerStatus: "actve"
+      });
+
+      if (match) {
+        io.in(matchRoom()).emit("match", await matchJson(match));
+        socket.join(matchRoom(match.channel));
+      }
+    });
+
+    socket.on("disconnect", async () => {
+      const deviceToken = SOCKETS_TO_DEVICES[socket.id];
+      if (deviceToken) {
+        const player = await Player.findOne({
+          where: {
+            deviceToken
+          }
+        });
+
+        MatchPlayer.update(
+          {
+            playerStatus: "inactive"
+          },
+          {
+            where: {
+              playerStatus: "active",
+              PlayerId: player.id
+            }
+          }
+        );
+
+        io.in(matchRoom()).emit("match", await matchJson(match));
+      }
+    });
+  });
+
+  return router;
+};

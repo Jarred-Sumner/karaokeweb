@@ -9,6 +9,13 @@ module.exports = {
         allowNull: false,
         primaryKey: true
       },
+      playerStatus: {
+        allowNull: false,
+        type: Sequelize.ENUM({
+          values: ["inactive", "active"]
+        }),
+        defaultValue: "inactive"
+      },
       MatchId: {
         allowNull: false,
         type: Sequelize.INTEGER,
